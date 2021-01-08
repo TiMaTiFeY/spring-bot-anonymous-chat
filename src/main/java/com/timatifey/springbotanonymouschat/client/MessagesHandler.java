@@ -2,6 +2,7 @@ package com.timatifey.springbotanonymouschat.client;
 
 import com.timatifey.springbotanonymouschat.client.longpoll.MessageNewObj;
 import com.timatifey.springbotanonymouschat.client.parser.MessageParser;
+import com.timatifey.springbotanonymouschat.client.parser.TypeMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.client.HttpClientErrorException;
@@ -37,16 +38,19 @@ public class MessagesHandler implements Runnable {
                 logger.info(msg.toString());
                 MessageParser parser = new MessageParser(msg.getText());
                 logger.info(parser.toString());
-
-                final StringBuilder requestURL = new StringBuilder(config.getBotHook());
-                requestURL.append(parser.getCommand());
-                logger.info("trying to run "+ msg.getText());
-                logger.info("trying POST: " + requestURL);
-                try {
-                    template.postForObject(requestURL.toString(), msgObj, String.class);
-                } catch (ResourceAccessException | HttpClientErrorException err) {
-                    client.sendMessage("Invalid command, please use /help for get the command list.",
-                            msg.getPeerId());
+                if (parser.getType() == TypeMessage.MESSAGE) {
+                    template.postForObject(config.getBotHook()+"/send", msgObj, String.class);
+                } else {
+                    final StringBuilder requestURL = new StringBuilder(config.getBotHook());
+                    requestURL.append(parser.getCommand());
+                    logger.info("trying to run " + msg.getText());
+                    logger.info("trying POST: " + requestURL);
+                    try {
+                        template.postForObject(requestURL.toString(), msgObj, String.class);
+                    } catch (ResourceAccessException | HttpClientErrorException err) {
+                        client.sendMessage("Invalid command, please use /help for get the command list.",
+                                msg.getPeerId());
+                    }
                 }
             } catch (InterruptedException e ) {
                 e.printStackTrace();

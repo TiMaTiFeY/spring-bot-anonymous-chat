@@ -1,0 +1,16 @@
+CREATE TABLE IF NOT EXISTS Chats
+(
+    id BIGSERIAL PRIMARY KEY,
+    name VARCHAR(255),
+    password VARCHAR(255),
+    count INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS Users
+(
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGSERIAL NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    in_chat BOOLEAN NOT NULL,
+    chat_id BIGSERIAL REFERENCES Chats (id)
+);
