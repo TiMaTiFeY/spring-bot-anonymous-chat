@@ -24,7 +24,7 @@ public class UsersService {
         this.chatsRepository = chatsRepository;
     }
 
-    public List<User> getUsersByChatId(long chatId) {
+    public List<User> getUsersInChatByChatId(long chatId) {
         return usersRepository.findAll().stream()
                 .filter(user -> user.isInChat() && user.getChat().getId() == chatId)
                 .collect(Collectors.toList());

@@ -3,6 +3,8 @@ package com.timatifey.springbotanonymouschat.client;
 import com.timatifey.springbotanonymouschat.client.longpoll.LongPoll;
 import com.timatifey.springbotanonymouschat.client.longpoll.LongPollRequestResponse;
 import com.timatifey.springbotanonymouschat.client.longpoll.LongPollServerResponse;
+import com.timatifey.springbotanonymouschat.service.UsersService;
+import lombok.Getter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -18,16 +20,28 @@ public class VKClient {
 
     private final RestTemplate template;
     private final ClientConfig config;
+    private final UsersService usersService;
+
+    @Getter
+    private ChatMessagesQueue chatMessagesQueue;
 
     @Autowired
-    VKClient(RestTemplate template, ClientConfig config) {
+    VKClient(RestTemplate template, ClientConfig config, UsersService usersService) {
         this.template = template;
         this.config = config;
+        this.usersService = usersService;
     }
 
     @PostConstruct
     void init() {
-        MessagesHandler messagesHandler = new MessagesHandler(this, config, template);
+        chatMessagesQueue = new ChatMessagesQueue(this, usersService);
+        new Thread(chatMessagesQueue).start();
+        MessagesHandler messagesHandler = new MessagesHandler(
+                this,
+                config,
+                template,
+                usersService,
+                chatMessagesQueue);
         LongPollServerResponse.Response longPollServer = getLongPollServer().getResponse();
         logger.info("server info: " + longPollServer.toString());
         LongPoll longPoll = new LongPoll(

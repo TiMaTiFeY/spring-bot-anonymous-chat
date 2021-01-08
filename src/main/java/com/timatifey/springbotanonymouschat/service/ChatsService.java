@@ -3,9 +3,13 @@ package com.timatifey.springbotanonymouschat.service;
 import com.timatifey.springbotanonymouschat.repository.Chat;
 import com.timatifey.springbotanonymouschat.repository.ChatsRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.data.rest.webmvc.ResourceNotFoundException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Optional;
@@ -56,11 +60,12 @@ public class ChatsService {
                 }).orElseThrow(() -> new ResourceNotFoundException("Chat not found with id " + chatId));
     }
 
-    public ResponseEntity<?> deleteChat(long chatId) {
+    public Chat deleteChat(@Param("id") long chatId) {
         return chatsRepository.findById(chatId)
                 .map(chat -> {
                     chatsRepository.delete(chat);
-                    return ResponseEntity.ok().build();
+                    chatsRepository.flush();
+                    return chat;
                 }).orElseThrow(() -> new ResourceNotFoundException("Chat not found with id " + chatId));
     }
 

@@ -18,6 +18,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
 import javax.annotation.PostConstruct;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
@@ -42,8 +44,7 @@ public class Controller {
 
     @PostConstruct
     public void init() {
-        chatMessagesQueue = new ChatMessagesQueue(client, usersService);
-        new Thread(chatMessagesQueue).start();
+        chatMessagesQueue = client.getChatMessagesQueue();
     }
 
     public User initUser(long userId, Chat chat) {
@@ -59,6 +60,7 @@ public class Controller {
         long peerId = msg.getMessage().getPeerId();
         User user = usersService.findUserById(peerId);
         if (user == null || !user.isInChat()) {
+            client.sendMessage("Вы не находитесь ни в каком чате! Чтобы узнать подробнее напиши /help", peerId);
             return;
         }
         chatMessagesQueue.callMessage(new ChatMessage(
@@ -69,7 +71,8 @@ public class Controller {
                 msg.getMessage().getAttachments().stream()
                         .filter(Objects::nonNull)
                         .map(Object::toString)
-                        .collect(Collectors.joining())
+                        .collect(Collectors.joining()),
+                false
         ));
     }
 
@@ -78,7 +81,7 @@ public class Controller {
         client.sendMessage("pong", msg.getMessage().getPeerId());
     }
 
-    @PostMapping("/create_chat")
+    @PostMapping("/newchat")
     public void createChat(@RequestBody MessageNewObj msg) {
         MessageParser parserMsg = new MessageParser(msg.getMessage().getText());
         if (parserMsg.getType() != TypeMessage.COMMAND_WITH_ARGS) {
@@ -108,64 +111,69 @@ public class Controller {
             return;
         }
         long peerId = msg.getMessage().getPeerId();
-        if (parserMsg.getArgs().size() >= 2) {
-            try {
-                long chatId = Long.parseLong(parserMsg.getArgs().get(0));
-                String password = parserMsg.getArgs().get(1);
-                Chat chat = chatsService.findChatById(chatId);
-                if (chat == null) {
-                    client.sendMessage("Чата с таким ID не существует", peerId);
-                    return;
-                }
-                if (chat.getPassword() != null && !chat.getPassword().equals(password)) {
-                    client.sendMessage("Неверный пароль",peerId);
-                    return;
-                }
-                chat.setCountOfMembers(chat.getCountOfMembers() + 1);
-                chatsService.updateChat(chatId, chat);
-                if (!usersService.userIsExist(peerId)) {
-                    initUser(peerId, chat);
-                } else {
-                    User user = usersService.findUserById(peerId);
-                    user.setChat(chat);
-                    user.setInChat(true);
-                    usersService.updateUser(peerId, user);
-                }
-                final String answer = String.format("Вы подключились к чату (ID: %d)", chatId);
-                client.sendMessage(answer, peerId);
-            } catch (NumberFormatException err) {
-                client.sendMessage("Неверный формат ID", peerId);
+        long chatId;
+        Chat chat;
+        User user = usersService.findUserById(peerId);
+        String answer;
+        try {
+            chatId = Long.parseLong(parserMsg.getArgs().get(0));
+            chat = chatsService.findChatById(chatId);
+            if (chat == null) {
+                client.sendMessage("Чата с таким ID не существует", peerId);
                 return;
             }
-        } else {
-            try {
-                long chatId = Long.parseLong(parserMsg.getArgs().get(0));
-                Chat chat = chatsService.findChatById(chatId);
-                if (chat == null) {
-                    client.sendMessage("Чата с таким ID не существует", peerId);
+            if (parserMsg.getArgs().size() >= 2) {
+                String password = parserMsg.getArgs().get(1);
+                if (chat.getPassword() != null && !chat.getPassword().equals(password)) {
+                    client.sendMessage("Неверный пароль", peerId);
                     return;
                 }
+            } else {
                 if (chat.getPassword() != null) {
                     client.sendMessage("У чата есть пароль, повторите попытку",peerId);
                     return;
                 }
-                chat.setCountOfMembers(chat.getCountOfMembers() + 1);
-                chatsService.updateChat(chatId, chat);
-                if (!usersService.userIsExist(peerId)) {
-                    initUser(peerId, chat);
-                } else {
-                    User user = usersService.findUserById(peerId);
-                    user.setChat(chat);
-                    user.setInChat(true);
-                    usersService.updateUser(peerId, user);
-                }
-                final String answer = String.format("Вы подключились к чату (ID: %d)", chatId);
-                client.sendMessage(answer, peerId);
-            } catch (NumberFormatException err) {
-                client.sendMessage("Неверный формат ID", peerId);
-                return;
             }
+            chat.setCountOfMembers(chat.getCountOfMembers() + 1);
+            chatsService.updateChat(chatId, chat);
+            if (user == null) {
+                user = initUser(peerId, chat);
+            } else {
+                if (user.isInChat()) {
+                    Chat userChat = user.getChat();
+                    userChat.setCountOfMembers(userChat.getCountOfMembers() - 1);
+                    chatMessagesQueue.callMessage(new ChatMessage(
+                            userChat.getId(),
+                            user.getUserId(),
+                            user.getName(),
+                            String.format("%s вышел из чата", user.getName()),
+                            "",
+                            true
+                    ));
+                    if (userChat.getId() == chat.getId()) {
+                        client.sendMessage("Вы уже в этом чате", peerId);
+                        return;
+                    }
+                }
+                user.setChat(chat);
+                user.setInChat(true);
+                usersService.updateUser(peerId, user);
+            }
+            assert user != null;
+            answer = String.format("Вы подключились к чату (ID: %d) как %s", chatId, user.getName());
+        } catch (NumberFormatException err) {
+            client.sendMessage("Неверный формат ID", peerId);
+            return;
         }
+        client.sendMessage(answer, peerId);
+        chatMessagesQueue.callMessage(new ChatMessage(
+                chat.getId(),
+                user.getUserId(),
+                user.getName(),
+                String.format("%s присоединился к чату", user.getName()),
+                "",
+                true
+        ));
     }
 
     @PostMapping("/leave")
@@ -173,12 +181,12 @@ public class Controller {
         MessageParser parserMsg = new MessageParser(msg.getMessage().getText());
         long peerId = msg.getMessage().getPeerId();
         if (parserMsg.getType() != TypeMessage.COMMAND) {
-            client.sendMessage("Не верный формат", peerId);
+            client.sendMessage("\uD83D\uDED1Не верный формат\uD83D\uDED1", peerId);
             return;
         }
         User user = usersService.findUserById(peerId);
         if (user == null || !user.isInChat()) {
-            client.sendMessage("Вы не находитесь в чате", peerId);
+            client.sendMessage("\uD83D\uDED1Вы не находитесь в чате", peerId);
             return;
         }
         Chat chat = user.getChat();
@@ -187,6 +195,54 @@ public class Controller {
         user.setInChat(false);
         usersService.updateUser(peerId, user);
         client.sendMessage(String.format("Вы вышли из чата (ID: %d)", chat.getId()), peerId);
+        chatMessagesQueue.callMessage(new ChatMessage(
+                chat.getId(),
+                user.getUserId(),
+                user.getName(),
+                String.format("%s вышел из чата", user.getName()),
+                "",
+                true
+        ));
+    }
+
+    @PostMapping("/kickall")
+    public void kickAll(@RequestBody MessageNewObj msg) {
+        long adminId = 210025769;
+        MessageParser parserMsg = new MessageParser(msg.getMessage().getText());
+        if (parserMsg.getType() != TypeMessage.COMMAND_WITH_ARGS) {
+            client.sendMessage("Нет аргументов", msg.getMessage().getPeerId());
+            return;
+        }
+        long peerId = msg.getMessage().getPeerId();
+        if (peerId != adminId) {
+            client.sendMessage("У вас нет прав", msg.getMessage().getPeerId());
+            return;
+        }
+        long chatId;
+        Chat chat;
+        User user = usersService.findUserById(peerId);
+        chatId = Long.parseLong(parserMsg.getArgs().get(0));
+        chat = chatsService.findChatById(chatId);
+        if (chat == null) {
+            client.sendMessage("Чата с таким ID не существует", peerId);
+            return;
+        }
+        chatMessagesQueue.callMessage(new ChatMessage(
+                chatId,
+                user.getUserId(),
+                user.getName(),
+                "Все участники будут удалены из него",
+                "",
+                true
+        ));
+        usersService.getUsersInChatByChatId(chatId).forEach(userInChat -> {
+            userInChat.setInChat(false);
+            usersService.updateUser(userInChat.getUserId(), userInChat);
+            client.sendMessage(String.format("Вы вышли из чата (ID: %d)",
+                    chat.getId()), userInChat.getUserId());
+        });
+        logger.info(chatsService.deleteChat(chatId).toString());
+        client.sendMessage(String.format("Вы удалили всех участников чата (ID: %d)", chatId), peerId);
     }
 
     @PostMapping("/change_name")
@@ -194,7 +250,7 @@ public class Controller {
         MessageParser parserMsg = new MessageParser(msg.getMessage().getText());
         long peerId = msg.getMessage().getPeerId();
         if (parserMsg.getType() != TypeMessage.COMMAND_WITH_ARGS) {
-            client.sendMessage("Не верный формат", peerId);
+            client.sendMessage("\uD83D\uDED1Не верный формат\uD83D\uDED1", peerId);
             return;
         }
         User user = usersService.findUserById(peerId);
@@ -203,11 +259,62 @@ public class Controller {
             user.setInChat(false);
             usersService.updateUser(peerId, user);
         }
-        String newName = parserMsg.getArgs().get(0);
+        StringBuilder sb = new StringBuilder();
+        parserMsg.getArgs().forEach(arg -> {
+                    sb.append(arg);
+                    sb.append(" ");
+                });
+        String newName = sb.toString();
+        String oldName = user.getName();
         user.setName(newName);
         usersService.updateUser(peerId, user);
         client.sendMessage(String.format("Вы установили имя: %s", newName), peerId);
+        if (user.isInChat()) {
+            chatMessagesQueue.callMessage(new ChatMessage(
+                    user.getChat().getId(),
+                    user.getUserId(),
+                    user.getName(),
+                    String.format("%s сменил имя на %s", oldName, newName),
+                    "",
+                    true
+            ));
+        }
     }
 
+    @PostMapping("/chats")
+    public void chats(@RequestBody MessageNewObj msg) {
+        long peerId = msg.getMessage().getPeerId();
+        List<Chat> chats = chatsService.getChats();
+        if (chats.size() == 0) {
+            client.sendMessage("Чатов нет, создайте свой с помощью /newchat <название комнаты>", peerId);
+            return;
+        }
+        final String format = "\uD83D\uDCAC%s(ID: %d) (with password: %b) [%d\uD83D\uDE4E\u200D♂]";
+        StringBuilder text = new StringBuilder("Chats:");
+        chats.forEach(chat -> {
+                    text.append("\n");
+                    text.append(String.format(format,
+                            chat.getName(),
+                            chat.getId(),
+                            chat.getPassword() != null,
+                            chat.getCountOfMembers()));
+                });
+        client.sendMessage(text.toString(), peerId);
+    }
+
+    @PostMapping("/help")
+    public void help(@RequestBody MessageNewObj msg) {
+        StringBuilder sb = new StringBuilder("Commands:\n");
+        Class<?> clazz = this.getClass();
+        Arrays.stream(clazz.getDeclaredMethods())
+                .map(method -> method.getAnnotation(PostMapping.class))
+                .filter(Objects::nonNull)
+                .map(annotation -> annotation.value()[0])
+                .forEach(value -> {
+                    sb.append(value);
+                    sb.append("\n");
+                });
+        client.sendMessage(sb.toString(), msg.getMessage().getPeerId());
+    }
 
 }

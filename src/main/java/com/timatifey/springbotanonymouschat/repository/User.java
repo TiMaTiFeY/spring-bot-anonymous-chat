@@ -4,6 +4,7 @@ import lombok.Data;
 import lombok.ToString;
 
 import javax.persistence.*;
+import java.util.Random;
 
 @Entity
 @Table(name = "users")
@@ -30,7 +31,7 @@ public class User {
 
     public User(long id) {
         this.userId = id;
-        this.name = "Anonymous";
+        this.name = "Anonymous"+ new Random().nextInt(100);;
         this.inChat = false;
     }
 
@@ -41,7 +42,7 @@ public class User {
 
     public User(long id, Chat chat) {
         this.userId = id;
-        this.name = "Anonymous";
+        this.name = "Anonymous"+ new Random().nextInt(100);
         this.chat = chat;
         inChat = true;
     }
@@ -55,7 +56,7 @@ public class User {
 
     public User() {
         userId = -1;
-        name = "Anonymous";
+        name = "Anonymous"+ new Random().nextInt(100);;
         inChat = false;
     }
 

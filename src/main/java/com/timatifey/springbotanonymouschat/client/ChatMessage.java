@@ -13,4 +13,5 @@ public class ChatMessage {
     private String nameOfUser;
     private String text;
     private String attachments;
+    private boolean isSystem;
 }
